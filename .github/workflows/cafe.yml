@@ -3,7 +3,7 @@ name: Dolce Gusto - Preços Diários
 on:
   schedule:
     - cron: '0 11 * * 1-5'  # 08:00 horário de Brasília (UTC-3), seg a sex
-  workflow_dispatch:          # permite rodar manualmente também
+  workflow_dispatch:
 
 jobs:
   scraper:
@@ -27,13 +27,23 @@ jobs:
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+          google-chrome --version
 
       - name: Rodar o scraper
         run: python dolcegusto_scraper.py
 
       - name: Salvar planilha como artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: capsulas-dolcegusto-${{ github.run_number }}
           path: "*_dolce_gusto_capsulas_precos.xlsx"
           retention-days: 30
+
+      - name: Salvar HTML de diagnóstico (em caso de falha)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-html-${{ github.run_number }}
+          path: debug_page.html
+          retention-days: 7
