@@ -2,8 +2,8 @@ name: Dolce Gusto - Preços Diários
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 08:00 horário de Brasília (UTC-3)
-  workflow_dispatch:       # permite rodar manualmente também
+    - cron: '0 11 * * 1-5'  # 08:00 horário de Brasília (UTC-3), seg a sex
+  workflow_dispatch:          # permite rodar manualmente também
 
 jobs:
   scraper:
@@ -19,10 +19,14 @@ jobs:
           python-version: '3.13'
 
       - name: Instalar dependências
+        run: pip install selenium webdriver-manager beautifulsoup4 pandas openpyxl
+
+      - name: Instalar Google Chrome
         run: |
-          pip install playwright openpyxl
-          playwright install chromium
-          playwright install-deps chromium
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
 
       - name: Rodar o scraper
         run: python dolcegusto_scraper.py
@@ -31,5 +35,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: capsulas-dolcegusto-${{ github.run_number }}
-          path: capsulas_dolcegusto_*.xlsx
+          path: "*_dolce_gusto_capsulas_precos.xlsx"
           retention-days: 30
