@@ -7,14 +7,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from datetime import datetime
-from itertools import groupby
 from pathlib import Path
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import re
-import os
+import time
 
 # =========================
 # 1. Configurações
@@ -24,23 +23,24 @@ URL = "https://www.nescafe-dolcegusto.com.br/sabores"
 OUTPUT_DIR = Path(__file__).parent
 TODAY = datetime.now().strftime("%Y-%m-%d")
 OUTPUT_FILE = OUTPUT_DIR / f"{TODAY}_dolce_gusto_capsulas_precos.xlsx"
-CATEGORIES = ["Lançamentos", "Cafés", "Lattes", "Chocolates", "Chás", "Starbucks"]
 
 # =========================
 # 2. Configurar navegador
 # =========================
 
 options = Options()
-options.add_argument("--headless")
+options.add_argument("--headless=new")   # headless moderno — renderiza JS igual ao browser normal
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--disable-blink-features=AutomationControlled")
+options.add_argument("--disable-gpu")
+options.add_argument("--window-size=1920,1080")
+options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 options.add_experimental_option("excludeSwitches", ["enable-automation"])
 options.add_experimental_option("useAutomationExtension", False)
-options.add_argument("--window-size=1920,1080")
 
 service = Service(ChromeDriverManager().install())
 driver = webdriver.Chrome(service=service, options=options)
+driver.set_page_load_timeout(60)
 
 # =========================
 # 3. Abrir site e aguardar produtos
@@ -49,24 +49,28 @@ driver = webdriver.Chrome(service=service, options=options)
 print("🔍 Acessando site da Dolce Gusto...")
 driver.get(URL)
 
+# Aguarda os produtos aparecerem (até 40s)
 try:
-    WebDriverWait(driver, 20).until(
+    WebDriverWait(driver, 40).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, ".spc-product__name"))
     )
+    print("✅ Produtos detectados na página.")
 except Exception:
-    print("⚠️  Timeout aguardando produtos — tentando continuar mesmo assim...")
+    print("⚠️  Timeout — salvando HTML para diagnóstico e tentando continuar...")
+    with open("debug_page.html", "w", encoding="utf-8") as f:
+        f.write(driver.page_source)
 
 # =========================
 # 4. Aceitar cookies, se aparecer
 # =========================
 
 try:
-    wait = WebDriverWait(driver, 5)
     botoes = driver.find_elements(By.TAG_NAME, "button")
     for botao in botoes:
         texto = botao.text.strip().lower()
         if any(p in texto for p in ["aceitar", "accept", "concordo", "permitir"]):
             botao.click()
+            time.sleep(1)
             break
 except Exception:
     pass
@@ -79,14 +83,7 @@ last_height = driver.execute_script("return document.body.scrollHeight")
 
 for _ in range(20):
     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-
-    try:
-        WebDriverWait(driver, 3).until(
-            lambda d: d.execute_script("return document.body.scrollHeight") > last_height
-        )
-    except Exception:
-        pass
-
+    time.sleep(2)
     new_height = driver.execute_script("return document.body.scrollHeight")
     if new_height == last_height:
         break
@@ -103,9 +100,7 @@ driver.quit()
 # 7. Extrair produtos
 # =========================
 
-# Seletores baseados no DevTools real do site
 cards = soup.select(".spc-product")
-
 print(f"Produtos encontrados: {len(cards)}")
 
 results = []
@@ -161,7 +156,7 @@ for card in cards:
 df = pd.DataFrame(results)
 
 if df.empty:
-    print("❌ Nenhum produto extraído. Os seletores podem ter mudado no site.")
+    print("❌ Nenhum produto extraído. Verifique o arquivo debug_page.html no artifact.")
     exit(1)
 
 df["preco_numerico"] = pd.to_numeric(df["preco_numerico"], errors="coerce")
@@ -177,7 +172,6 @@ wb = openpyxl.Workbook()
 ws = wb.active
 ws.title = "Cápsulas"
 
-# Estilos
 hd_font   = Font(name="Arial", bold=True, color="FFFFFF", size=11)
 hd_fill   = PatternFill("solid", start_color="B00000")
 data_font = Font(name="Arial", size=10)
@@ -187,7 +181,6 @@ brl_fmt   = 'R$#,##0.00'
 thin      = Side(style="thin", color="DDDDDD")
 border    = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-# Título
 ws.merge_cells("A1:H1")
 ws["A1"] = "Nescafé Dolce Gusto — Preços das Cápsulas"
 ws["A1"].font = Font(name="Arial", bold=True, size=13, color="B00000")
@@ -201,7 +194,6 @@ ws["A2"].alignment = center
 ws.row_dimensions[1].height = 24
 ws.row_dimensions[2].height = 16
 
-# Cabeçalhos
 headers = [
     ("#", 5), ("Data", 13), ("Categoria", 18), ("Produto", 44),
     ("Preço", 14), ("Cápsulas", 12), ("Custo/Cápsula", 15), ("SKU", 14),
@@ -217,20 +209,13 @@ for col, (h, w) in enumerate(headers, 1):
 
 ws.row_dimensions[3].height = 20
 
-# Dados
 for i, row_data in enumerate(df.itertuples(index=False), 1):
     r = i + 3
     alt_fill = PatternFill("solid", start_color="FFF5F5" if i % 2 == 0 else "FFFFFF")
 
     values = [
-        i,
-        row_data.data_atualizacao,
-        row_data.categoria,
-        row_data.produto,
-        row_data.preco_numerico,
-        row_data.capsulas,
-        row_data.custo_por_capsula,
-        row_data.sku,
+        i, row_data.data_atualizacao, row_data.categoria, row_data.produto,
+        row_data.preco_numerico, row_data.capsulas, row_data.custo_por_capsula, row_data.sku,
     ]
     aligns = [center, center, center, left_al, center, center, center, center]
     fmts   = [None, None, None, None, brl_fmt, None, brl_fmt, None]
@@ -247,6 +232,5 @@ for i, row_data in enumerate(df.itertuples(index=False), 1):
     ws.row_dimensions[r].height = 17
 
 ws.freeze_panes = "A4"
-
 wb.save(OUTPUT_FILE)
 print(f"📊 Planilha salva em: {OUTPUT_FILE}")
