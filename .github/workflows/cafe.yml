@@ -1,0 +1,35 @@
+name: Dolce Gusto - Preços Diários
+
+on:
+  schedule:
+    - cron: '0 11 * * *'  # 08:00 horário de Brasília (UTC-3)
+  workflow_dispatch:       # permite rodar manualmente também
+
+jobs:
+  scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Instalar dependências
+        run: |
+          pip install playwright openpyxl
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Rodar o scraper
+        run: python dolcegusto_scraper.py
+
+      - name: Salvar planilha como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: capsulas-dolcegusto-${{ github.run_number }}
+          path: capsulas_dolcegusto_*.xlsx
+          retention-days: 30
